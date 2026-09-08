@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>DEADZONE: OUTBREAK — V6 FREE AIM</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080b0c;color:#fff;font-family:Arial,sans-serif;touch-action:none}
+canvas{position:fixed;inset:0;width:100%;height:100%}
+#hud{position:fixed;top:max(10px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:4;display:none;white-space:nowrap}
+.bar{display:flex;gap:8px;align-items:center;background:#050708e8;border:1px solid #ffffff25;border-radius:15px;padding:8px 10px;font-size:12px;font-weight:900}
+.pill{padding:5px 8px;background:#ffffff10;border-radius:8px}
+#weapon{color:#ffd76a}
+#controls{position:fixed;inset:0;z-index:5;display:none;pointer-events:none}
+#stick,#aimstick{position:absolute;bottom:max(24px,env(safe-area-inset-bottom));width:126px;height:126px;border:2px solid #ffffff2a;background:#ffffff12;border-radius:50%;pointer-events:auto}
+#stick{left:24px}
+#aimstick{right:24px}
+#knob,#aimstick:after{content:"AIM";position:absolute;right:8px;bottom:8px;font-size:10px;font-weight:900;opacity:.45}#aimknob{position:absolute;left:36px;top:36px;width:50px;height:50px;border-radius:50%;background:#ffffff42}
+.ctrl{position:absolute;border:2px solid #ffffff30;color:#fff;background:#ffffff18;border-radius:50%;font-weight:900;pointer-events:auto}
+#fire{right:170px;bottom:max(48px,env(safe-area-inset-bottom));width:82px;height:82px;background:#ffffff28;opacity:.18}
+#interact{display:none;right:50%;transform:translateX(50%);top:55%;width:145px;height:52px;border-radius:13px;background:#ffd34f;color:#111;box-shadow:0 5px 20px #0008}
+#message{position:fixed;top:45%;left:0;right:0;z-index:6;text-align:center;font-size:22px;font-weight:900;text-shadow:0 3px 12px #000;pointer-events:none}
+.screen{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle,#182122,#070a0b 72%)}
+.card{width:min(90vw,560px);padding:28px;text-align:center}
+h1{font-size:clamp(42px,12vw,78px);line-height:.82;margin:0;letter-spacing:-3px}
+h1 span{display:block;font-size:.48em;letter-spacing:6px;margin-top:12px}
+h2{margin:12px 0 0}
+p{color:#aeb8ba;line-height:1.5}
+button.main{margin-top:18px;border:0;border-radius:15px;padding:17px 28px;font-size:20px;font-weight:900}
+#gameover{display:none}
+.small{font-size:12px;color:#849092;margin-top:15px}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="title" class="screen">
+ <div class="card">
+  <h1>DEADZONE<span>OUTBREAK</span></h1>
+  <h2>V6 • AIM TO FIRE</h2>
+  <p>Clear the first zone, earn credits, buy the gate and push deeper into the outbreak.</p>
+  <button class="main" id="start">START RUN</button>
+  <div class="small">Move • Aim • Fire • Buy • Survive</div>
+ </div>
+</div>
+
+<div id="gameover" class="screen">
+ <div class="card">
+  <h1 style="font-size:54px">RUN OVER</h1>
+  <p id="final"></p>
+  <button class="main" id="restart">PLAY AGAIN</button>
+ </div>
+</div>
+
+<div id="hud">
+ <div class="bar">
+  <span class="pill" id="zone">ZONE 1</span>
+  <span class="pill" id="wave">WAVE 1</span>
+  <span class="pill" id="hp">HP 100</span>
+  <span class="pill" id="cash">CREDITS $500</span>
+  <span class="pill" id="ammo">12/60</span>
+  <span class="pill" id="weapon">PISTOL</span>
+  <span class="pill" id="level">LV 1</span>
+ </div>
+</div>
+
+<div id="message"></div>
+<div id="controls">
+ <div id="stick"><div id="knob"></div></div>
+ <div id="aimstick"><div id="aimknob"></div></div>
+ <button class="ctrl" id="fire">FIRE</button>
+ <button class="ctrl" id="interact">BUY</button>
+</div>
+
+<script>
+(function(){
+"use strict";
+var c=document.getElementById("game"),ctx=c.getContext("2d");
+var title=document.getElementById("title"),over=document.getElementById("gameover");
+var start=document.getElementById("start"),restart=document.getElementById("restart");
+var controls=document.getElementById("controls"),hud=document.getElementById("hud");
+var stick=document.getElementById("stick"),knob=document.getElementById("knob"),aimstick=document.getElementById("aimstick"),aimknob=document.getElementById("aimknob");
+var fire=document.getElementById("fire"),reloadBtn=document.getElementById("reload"),swapBtn=document.getElementById("swap"),interact=document.getElementById("interact");
+var zoneT=document.getElementById("zone"),waveT=document.getElementById("wave"),hpT=document.getElementById("hp"),cashT=document.getElementById("cash"),ammoT=document.getElementById("ammo"),weaponT=document.getElementById("weapon"),levelT=document.getElementById("level"),message=document.getElementById("message"),finalT=document.getElementById("final");
+var W=innerWidth,H=innerHeight,dpr=1,last=0,raf=0,running=false;
+var joyX=0,joyY=0,firing=false;
+var world={w:2600,h:1700};
+var player,weapons,weaponWalls=[],zombies=[],bullets=[],pickups=[],particles=[],walls=[];
+var wave=1,zone=1,credits=500,score=0,xp=0,level=1,spawnLeft=0,spawnTimer=0,gateOpen=false,shopCooldown=0;
+
+function resize(){W=innerWidth;H=innerHeight;dpr=Math.min(devicePixelRatio||1,2);c.width=W*dpr;c.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener("resize",resize);resize();
+
+function reset(){
+ weapons=[
+  {name:"PISTOL",mag:12,ammo:12,reserve:72,damage:42,rate:.24,speed:760,price:0,owned:true},
+  {name:"SMG",mag:30,ammo:0,reserve:0,damage:27,rate:.085,speed:820,price:650,owned:false},
+  {name:"SHOTGUN",mag:6,ammo:0,reserve:0,damage:25,rate:.62,speed:680,price:900,owned:false}
+ ];
+ player={x:430,y:850,r:20,hp:100,maxHp:100,speed:235,angle:0,weapon:0,cool:0,reloading:false,reloadT:0};
+ zombies=[];bullets=[];pickups=[];particles=[];wave=1;zone=1;credits=500;score=0;xp=0;level=1;spawnLeft=0;spawnTimer=0;gateOpen=false;shopCooldown=0;
+ walls=[
+  {x:120,y:120,w:2360,h:40},{x:120,y:1540,w:2360,h:40},{x:120,y:120,w:40,h:1420},{x:2440,y:120,w:40,h:1420},
+  {x:900,y:160,w:40,h:600},{x:900,y:940,w:40,h:560},
+  {x:1500,y:160,w:40,h:430},{x:1500,y:700,w:40,h:800},
+  {x:900,y:760,w:600,h:40},
+  {x:1500,y:590,w:540,h:40},
+  {x:2040,y:590,w:40,h:950}
+ ];
+ // Weapon-wall positions. These are purchases, not a shared armoury inventory.
+ weaponWalls=[
+  {x:1110,y:535,w:140,h:28,weapon:1,label:"SMG  $650"},
+  {x:1780,y:680,w:160,h:28,weapon:2,label:"SHOTGUN  $900"}
+ ];
+}function msg(t){message.textContent=t;setTimeout(function(){if(message.textContent===t)message.textContent=""},1100)}
+function updateHud(){
+ var w=weapons[player.weapon];
+ zoneT.textContent="ZONE "+zone;waveT.textContent="WAVE "+wave;hpT.textContent="HP "+Math.max(0,Math.ceil(player.hp));
+ cashT.textContent="CREDITS $"+credits;ammoT.textContent=player.reloading?"RELOADING":w.ammo+"/"+w.reserve;
+ weaponT.textContent=w.name;levelT.textContent="LV "+level;
+}
+function startGame(){reset();running=true;title.style.display="none";over.style.display="none";controls.style.display="block";hud.style.display="block";last=performance.now();raf=
+aimstick.addEventListener('pointerup',()=>{
+  firing=false;
+  if(autoFireTimer){clearInterval(autoFireTimer);autoFireTimer=null;}
+});
+aimstick.addEventListener('pointercancel',()=>{
+  firing=false;
+  if(autoFireTimer){clearInterval(autoFireTimer);autoFireTimer=null;}
+});
+
+requestAnimationFrame(loop)}
+function endGame(){running=false;controls.style.display="none";hud.style.display="none";finalT.textContent="Score "+score+" • Wave "+wave+" • Zone "+zone+" • Credits $"+credits;over.style.display="flex";cancelAnimationFrame(raf)}
+function buyWeapon(i){
+ var w=weapons[i];
+ if(w.owned){player.weapon=i;msg(w.name+" EQUIPPED");return}
+ if(credits<w.price){msg("NEED $"+w.price);return}
+ credits-=w.price;w.owned=true;w.ammo=w.mag;w.reserve=w.mag*3;player.weapon=i;msg(w.name+" PURCHASED");
+ updateHud();
+}
+function nearWeaponWall(){
+ for(var i=0;i<weaponWalls.length;i++){
+  var q=weaponWalls[i];
+  if(Math.abs(player.x-(q.x+q.w/2))<105 && Math.abs(player.y-(q.y+q.h/2))<105)return q;
+ }
+ return null;
+}
+function reload(){
+ var w=weapons[player.weapon];
+ if(player.reloading||w.ammo>=w.mag||w.reserve<=0)return;
+ player.reloading=true;
+ player.reloadT=player.weapon===1?.85:player.weapon===2?1.05:.72;
+}
+function shoot(){
+ if(!running||player.reloading||player.cool>0)return;
+ var w=weapons[player.weapon];
+ if(w.ammo<=0){reload();return}
+ w.ammo--;player.cool=w.rate;if(w.ammo===0&&w.reserve>0)reload();
+ if(player.weapon===2){
+  for(var k=-2;k<=2;k++)bullet(player.angle+k*.075,w.damage,w.speed);
+ }else bullet(player.angle,w.damage,w.speed);
+ updateHud();
+}
+function bullet(a,d,s){bullets.push({x:player.x+Math.cos(a)*25,y:player.y+Math.sin(a)*25,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1.1,dmg:d})}
+function spawnZombie(){
+ var side=Math.floor(Math.random()*4),x,y;
+ if(side===0){x=170+Math.random()*2200;y=200}else if(side===1){x=170+Math.random()*2200;y=1500}else if(side===2){x=200;y=200+Math.random()*1200}else{x=2400;y=200+Math.random()*1200}
+ if(zone===2 && Math.random()<.18)x=1750+Math.random()*500;
+ var r=Math.random(),z;
+ if(r<.12+wave*.005)z={kind:"BRUTE",r:26,hp:190+wave*18,max:190+wave*18,speed:48,damage:25};
+ else if(r<.3)z={kind:"RUNNER",r:14,hp:55+wave*5,max:55+wave*5,speed:135,damage:12};
+ else if(r<.43)z={kind:"SPITTER",r:18,hp:95+wave*8,max:95+wave*8,speed:58,damage:8};
+ else z={kind:"WALKER",r:18,hp:80+wave*10,max:80+wave*10,speed:67,damage:14};
+ z.x=x;z.y=y;z.hit=0;z.shootT=1.5+Math.random()*2;zombies.push(z);
+}
+function addPickup(x,y,type){pickups.push({x:x,y:y,type:type,r:14})}
+function kill(z){
+ var idx=zombies.indexOf(z);if(idx<0)return;zombies.splice(idx,1);
+ var gain=z.kind==="BRUTE"?60:z.kind==="SPITTER"?35:z.kind==="RUNNER"?18:12;credits+=gain;score+=gain;
+ xp+=z.kind==="BRUTE"?35:12;
+ if(Math.random()<.13)addPickup(z.x,z.y,Math.random()<.55?"ammo":"med");
+ if(xp>=level*90){xp-=level*90;level++;player.maxHp+=8;player.hp=Math.min(player.maxHp,player.hp+25);credits+=100;msg("LEVEL UP +$100")}
+ for(var i=0;i<8;i++)particles.push({x:z.x,y:z.y,vx:(Math.random()-.5)*130,vy:(Math.random()-.5)*130,life:.35});
+}
+function blocked(nx,ny,r){
+ for(var i=0;i<walls.length;i++){var a=walls[i];if(nx+r>a.x&&nx-r<a.x+a.w&&ny+r>a.y&&ny-r<a.y+a.h)return true}
+ if(!gateOpen && nx+r>1470&&nx-r<1570&&ny>545&&ny<755)return true;
+ return false;
+}
+function nearGate(){
+ return !gateOpen && Math.abs(player.x-1520)<145 && player.y>545 && player.y<755;
+}
+function interactGate(){
+ if(!nearGate())return;
+ if(credits>=400){
+  credits-=400;gateOpen=true;zone=2;player.x=1610;msg("GATE OPEN • ZONE 2!");
+ }else msg("NEED $400");
+}
+function interactNearby(){
+ var q=nearWeaponWall();
+ if(q){buyWeapon(q.weapon);return}
+ if(nearGate()){interactGate();return}
+}
+function nearestZombie(){
+ var n=null,b=1e9;for(var i=0;i<zombies.length;i++){var d=Math.hypot(zombies[i].x-player.x,zombies[i].y-player.y);if(d<b){b=d;n=zombies[i]}}return n
+}
+function update(dt){
+ if(!running)return;
+ var dx=joyX,dy=joyY,l=Math.hypot(dx,dy);if(l>1){dx/=l;dy/=l}
+ var nx=player.x+dx*player.speed*dt,ny=player.y+dy*player.speed*dt;
+ if(!blocked(nx,player.y,player.r))player.x=nx;if(!blocked(player.x,ny,player.r))player.y=ny;
+ player.cool=Math.max(0,player.cool-dt);
+ if(firing)shoot();
+ var w=weapons[player.weapon];
+ if(player.reloading){player.reloadT-=dt;if(player.reloadT<=0){var need=w.mag-w.ammo,give=Math.min(need,w.reserve);w.ammo+=give;w.reserve-=give;player.reloading=false}}
+ 
+ if(zombies.length===0&&spawnLeft===0){spawnLeft=5+wave*3+zone*2;spawnTimer=0}
+ if(spawnLeft>0){spawnTimer-=dt;if(spawnTimer<=0){spawnZombie();spawnLeft--;spawnTimer=Math.max(.15,.55-wave*.018)}}
+ else if(zombies.length===0){wave++;credits+=75;msg("WAVE "+wave+" • +$75");spawnLeft=5+wave*3+zone*2}
+ for(var i=bullets.length-1;i>=0;i--){var b=bullets[i];b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;if(b.life<=0){bullets.splice(i,1);continue}
+  var hit=false;for(var j=zombies.length-1;j>=0;j--){var z=zombies[j];if(Math.hypot(b.x-z.x,b.y-z.y)<z.r+5){z.hp-=b.dmg;z.hit=.08;bullets.splice(i,1);if(z.hp<=0)kill(z);hit=true;break}}}
+ for(var zi=zombies.length-1;zi>=0;zi--){var z=zombies[zi],dx2=player.x-z.x,dy2=player.y-z.y,d=Math.hypot(dx2,dy2);
+  if(z.hit>0)z.hit-=dt;
+  if(z.kind==="SPITTER"&&d<520){z.shootT-=dt;if(z.shootT<=0){z.shootT=2.5;var a=Math.atan2(dy2,dx2);bullets.push({x:z.x,y:z.y,vx:Math.cos(a)*270,vy:Math.sin(a)*270,life:2.2,dmg:z.damage*1.6,enemy:true})}}
+  if(d>player.r+z.r+3){z.x+=dx2/d*z.speed*dt;z.y+=dy2/d*z.speed*dt}else player.hp-=z.damage*dt;
+ }
+ for(var bi=bullets.length-1;bi>=0;bi--){var bb=bullets[bi];if(bb.enemy&&Math.hypot(bb.x-player.x,bb.y-player.y)<player.r+6){player.hp-=bb.dmg;bullets.splice(bi,1)}}
+ for(var pi=pickups.length-1;pi>=0;pi--){var p=pickups[pi];if(Math.hypot(p.x-player.x,p.y-player.y)<player.r+p.r){if(p.type==="ammo"){weapons[player.weapon].reserve+=Math.floor(weapons[player.weapon].mag*1.5);msg("AMMO +")}else{player.hp=Math.min(player.maxHp,player.hp+30);msg("MEDKIT +30")}pickups.splice(pi,1)}}
+ particles.forEach(function(p){p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt});particles=particles.filter(function(p){return p.life>0});
+ if(player.hp<=0){endGame();return}
+ var q=nearWeaponWall(),ng=nearGate();
+ if(q){interact.style.display="block";interact.innerHTML=weapons[q.weapon].owned?"EQUIP "+weapons[q.weapon].name:"BUY "+q.label}
+ else if(ng){interact.style.display="block";interact.innerHTML="BUY GATE<br>$400"}
+ else interact.style.display="none";
+ updateHud();
+}
+function draw(){
+ var camX=Math.max(0,Math.min(world.w-W,player.x-W/2)),camY=Math.max(0,Math.min(world.h-H,player.y-H/2));
+ ctx.clearRect(0,0,W,H);ctx.fillStyle="#11191a";ctx.fillRect(0,0,W,H);
+ ctx.save();ctx.translate(-camX,-camY);
+ // floor
+ ctx.fillStyle="#182021";ctx.fillRect(0,0,world.w,world.h);
+ ctx.strokeStyle="#ffffff0b";for(var gx=0;gx<world.w;gx+=60){ctx.beginPath();ctx.moveTo(gx,0);ctx.lineTo(gx,world.h);ctx.stroke()}for(var gy=0;gy<world.h;gy+=60){ctx.beginPath();ctx.moveTo(0,gy);ctx.lineTo(world.w,gy);ctx.stroke()}
+ // rooms
+ ctx.fillStyle="#1d292a";ctx.fillRect(170,170,680,1360);ctx.fillStyle="#202d2e";ctx.fillRect(940,170,520,560);ctx.fillStyle="#202d2e";ctx.fillRect(1540,170,850,370);ctx.fillStyle="#202d2e";ctx.fillRect(1540,740,850,760);
+ // walls
+ walls.forEach(function(a){ctx.fillStyle="#364244";ctx.fillRect(a.x,a.y,a.w,a.h)});
+ if(!gateOpen){ctx.fillStyle="#e1b72f";ctx.fillRect(1470,545,100,210);ctx.fillStyle="#111";ctx.font="bold 16px Arial";ctx.fillText("$400",1498,655)}
+ else {ctx.fillStyle="#4f8b63";ctx.fillRect(1470,545,100,210);ctx.fillStyle="#fff";ctx.font="bold 12px Arial";ctx.fillText("OPEN",1498,655)}
+ // wall-buy weapon boards
+ weaponWalls.forEach(function(q){
+   var w=weapons[q.weapon];
+   ctx.fillStyle="#101718";ctx.fillRect(q.x,q.y,q.w,q.h);
+   ctx.strokeStyle=w.owned?"#6fc98d":"#e4bd49";ctx.lineWidth=3;ctx.strokeRect(q.x,q.y,q.w,q.h);
+   ctx.fillStyle="#fff";ctx.font="bold 13px Arial";ctx.fillText(w.owned?"OWNED":"BUY "+q.label,q.x+8,q.y+19);
+ });
+ ctx.fillStyle="#fff";ctx.font="bold 18px Arial";ctx.fillText("WEAPON WALL",1050,265);
+ // pickups
+ pickups.forEach(function(p){ctx.fillStyle=p.type==="ammo"?"#e3bd49":"#70c98c";ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();ctx.fillStyle="#101516";ctx.font="bold 11px Arial";ctx.fillText(p.type==="ammo"?"AM":"HP",p.x-8,p.y+4)});
+ // zombies
+ zombies.forEach(function(z){ctx.fillStyle=z.hit>0?"#fff":z.kind==="BRUTE"?"#69463f":z.kind==="RUNNER"?"#7e9146":z.kind==="SPITTER"?"#5d5d88":"#55705e";ctx.beginPath();ctx.arc(z.x,z.y,z.r,0,Math.PI*2);ctx.fill();ctx.fillStyle="#111";ctx.beginPath();ctx.arc(z.x-5,z.y-3,3,0,Math.PI*2);ctx.arc(z.x+5,z.y-3,3,0,Math.PI*2);ctx.fill();ctx.fillStyle="#e85b57";ctx.fillRect(z.x-z.r,z.y-z.r-7,z.r*2*Math.max(0,z.hp/z.max),4)});
+ // bullets
+ bullets.forEach(function(b){ctx.fillStyle=b.enemy?"#a979e8":"#fff";ctx.beginPath();ctx.arc(b.x,b.y,4,0,Math.PI*2);ctx.fill()});
+ // player
+ ctx.save();ctx.translate(player.x,player.y);ctx.rotate(player.angle);ctx.fillStyle="#dce2e3";ctx.fillRect(0,-5,31,10);ctx.fillStyle="#f3f5f5";ctx.beginPath();ctx.arc(0,0,19,0,Math.PI*2);ctx.fill();ctx.fillStyle="#273033";ctx.beginPath();ctx.arc(0,0,8,0,Math.PI*2);ctx.fill();ctx.restore();
+ ctx.fillStyle="#0009";ctx.fillRect(player.x-32,player.y+27,64,5);ctx.fillStyle="#e5f0f0";ctx.fillRect(player.x-32,player.y+27,64*Math.max(0,player.hp/player.maxHp),5);
+ particles.forEach(function(p){ctx.fillStyle="#fff8";ctx.fillRect(p.x,p.y,3,3)});
+ ctx.restore();
+}
+function loop(t){var dt=Math.min(.033,(t-last)/1000||0);last=t;update(dt);draw();if(running)raf=requestAnimationFrame(loop)}
+function joy(e){
+ var r=stick.getBoundingClientRect(),x=e.clientX-r.left-r.width/2,y=e.clientY-r.top-r.height/2,m=48,d=Math.hypot(x,y);
+ if(d>m){x=x/d*m;y=y/d*m}joyX=x/m;joyY=y/m;knob.style.transform="translate("+x+"px,"+y+"px)"
+}
+function joyStop(){joyX=0;joyY=0;knob.style.transform="translate(0,0)"}
+var aimPointerId=null;
+function aim(e){
+ var r=aimstick.getBoundingClientRect(),x=e.clientX-(r.left+r.width/2),y=e.clientY-(r.top+r.height/2),m=48,d=Math.hypot(x,y);
+ if(d>m){x=x/d*m;y=y/d*m}
+ if(d>6) player.angle=Math.atan2(y,x);
+ aimknob.style.transform="translate("+x+"px,"+y+"px)";
+}
+function startAutoFire(){
+ firing=true;
+ if(!autoFireTimer) autoFireTimer=setInterval(function(){ if(firing) shoot(); },35);
+}
+function stopAutoFire(){
+ firing=false;
+ if(autoFireTimer){clearInterval(autoFireTimer);autoFireTimer=null;}
+}
+function aimStop(e){
+ if(e && aimPointerId!==null && e.pointerId!==aimPointerId) return;
+ aimPointerId=null;
+ stopAutoFire();
+ aimknob.style.transform="translate(0,0)";
+}
+stick.addEventListener("pointerdown",function(e){e.preventDefault();stick.setPointerCapture(e.pointerId);joy(e)});
+stick.addEventListener("pointermove",function(e){joy(e)});
+stick.addEventListener("pointerup",joyStop);stick.addEventListener("pointercancel",joyStop);
+aimstick.addEventListener("pointerdown",function(e){e.preventDefault();aimPointerId=e.pointerId;aimstick.setPointerCapture(e.pointerId);aim(e);startAutoFire()});
+aimstick.addEventListener("pointermove",function(e){if(aimPointerId===e.pointerId) aim(e)});
+aimstick.addEventListener("pointerup",aimStop);aimstick.addEventListener("pointercancel",aimStop);
+
+interact.addEventListener("pointerdown",function(e){e.preventDefault();interactNearby()});
+start.addEventListener("click",startGame);start.addEventListener("touchend",function(e){e.preventDefault();startGame()});
+restart.addEventListener("click",startGame);restart.addEventListener("touchend",function(e){e.preventDefault();startGame()});
+reset();draw();
+})();
+</script>
+</body>
+</html>
