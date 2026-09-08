@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>DEADZONE: OUTBREAK</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#070a0b;color:#fff;font-family:Arial,sans-serif;touch-action:none}
+body{display:flex;align-items:center;justify-content:center}
+#game{position:fixed;inset:0;width:100%;height:100%;background:#101516}
+canvas{display:block;width:100%;height:100%}
+.screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle,#172022 0,#070a0b 70%);z-index:10}
+.card{text-align:center;width:min(88vw,520px);padding:30px}
+h1{font-size:clamp(42px,12vw,76px);line-height:.85;margin:0;font-weight:900;letter-spacing:-3px}
+h1 span{display:block;font-size:.52em;letter-spacing:5px;margin-top:12px}
+p{color:#aab5b7;line-height:1.5}
+button{border:0;border-radius:16px;font-weight:900;font-size:20px;padding:17px 28px;background:#e7edf0;color:#101516;box-shadow:0 8px 25px #0008}
+#start{margin-top:18px;min-width:220px}
+#hud{position:fixed;top:max(14px,env(safe-area-inset-top));left:0;right:0;z-index:3;display:none;pointer-events:none;text-align:center}
+.stats{display:inline-flex;gap:14px;background:#070a0bd9;border:1px solid #ffffff22;border-radius:14px;padding:9px 13px;font-size:13px;font-weight:bold}
+#controls{position:fixed;inset:0;z-index:4;display:none;pointer-events:none}
+#stick{position:absolute;left:25px;bottom:max(25px,env(safe-area-inset-bottom));width:125px;height:125px;border-radius:50%;background:#ffffff12;border:2px solid #ffffff25;pointer-events:auto}
+#knob{position:absolute;left:37px;top:37px;width:51px;height:51px;border-radius:50%;background:#ffffff45}
+.ctrl{position:absolute;bottom:max(35px,env(safe-area-inset-bottom));border-radius:50%;width:82px;height:82px;pointer-events:auto;border:2px solid #ffffff35;background:#ffffff18;color:#fff;font-size:13px}
+#fire{right:25px;background:#ffffff30}
+#reload{right:120px;width:65px;height:65px;bottom:max(45px,env(safe-area-inset-bottom));font-size:11px}
+#message{position:fixed;left:0;right:0;top:48%;z-index:5;text-align:center;font-size:24px;font-weight:900;text-shadow:0 3px 10px #000;pointer-events:none}
+#gameover{display:none}
+#restart{margin-top:15px}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="title" class="screen">
+  <div class="card">
+    <h1>DEADZONE<span>OUTBREAK</span></h1>
+    <p>Survive the outbreak. Move, aim, shoot and reload.</p>
+    <button id="start">START RUN</button>
+  </div>
+</div>
+
+<div id="gameover" class="screen">
+  <div class="card">
+    <h1 style="font-size:52px">RUN OVER</h1>
+    <p id="final"></p>
+    <button id="restart">PLAY AGAIN</button>
+  </div>
+</div>
+
+<div id="hud">
+  <div class="stats">
+    <span id="wave">WAVE 1</span>
+    <span id="hp">HP 100</span>
+    <span id="ammo">12 / 60</span>
+    <span id="xp">LV 1</span>
+  </div>
+</div>
+
+<div id="message"></div>
+
+<div id="controls">
+  <div id="stick"><div id="knob"></div></div>
+  <button class="ctrl" id="reload">RELOAD</button>
+  <button class="ctrl" id="fire">FIRE</button>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+var canvas=document.getElementById("game");
+var ctx=canvas.getContext("2d");
+var title=document.getElementById("title");
+var gameover=document.getElementById("gameover");
+var start=document.getElementById("start");
+var restart=document.getElementById("restart");
+var controls=document.getElementById("controls");
+var hud=document.getElementById("hud");
+var stick=document.getElementById("stick");
+var knob=document.getElementById("knob");
+var fire=document.getElementById("fire");
+var reloadButton=document.getElementById("reload");
+var waveText=document.getElementById("wave");
+var hpText=document.getElementById("hp");
+var ammoText=document.getElementById("ammo");
+var xpText=document.getElementById("xp");
+var finalText=document.getElementById("final");
+var message=document.getElementById("message");
+
+var W=window.innerWidth,H=window.innerHeight;
+var running=false, last=0, raf=0;
+var player, bullets=[], zombies=[], particles=[];
+var wave=1, score=0, xp=0, level=1, spawnLeft=0, spawnTimer=0;
+var joyX=0,joyY=0, firing=false, reloadTimer=0, muzzle=0;
+
+function resize(){
+  W=window.innerWidth; H=window.innerHeight;
+  var d=Math.min(window.devicePixelRatio||1,2);
+  canvas.width=Math.floor(W*d); canvas.height=Math.floor(H*d);
+  canvas.style.width=W+"px"; canvas.style.height=H+"px";
+  ctx.setTransform(d,0,0,d,0,0);
+}
+window.addEventListener("resize",resize);
+resize();
+
+function reset(){
+  player={x:W/2,y:H/2,r:18,hp:100,maxHp:100,ammo:12,mag:12,reserve:60,
+          speed:205,angle:0,shootCooldown:0,reloading:false};
+  bullets=[];zombies=[];particles=[];
+  wave=1;score=0;xp=0;level=1;spawnLeft=0;spawnTimer=0;
+  message.textContent="";
+  updateHud();
+}
+
+function startGame(){
+  reset();
+  running=true;
+  title.style.display="none";
+  gameover.style.display="none";
+  controls.style.display="block";
+  hud.style.display="block";
+  last=performance.now();
+  cancelAnimationFrame(raf);
+  raf=requestAnimationFrame(loop);
+}
+
+function endGame(){
+  running=false;
+  controls.style.display="none";
+  hud.style.display="none";
+  finalText.textContent="Score "+score+" • Wave "+wave+" • Level "+level;
+  gameover.style.display="flex";
+  cancelAnimationFrame(raf);
+}
+
+function updateHud(){
+  if(!player)return;
+  waveText.textContent="WAVE "+wave;
+  hpText.textContent="HP "+Math.max(0,Math.ceil(player.hp));
+  ammoText.textContent=player.reloading?"RELOADING":player.ammo+" / "+player.reserve;
+  xpText.textContent="LV "+level;
+}
+
+function say(t){
+  message.textContent=t;
+  setTimeout(function(){if(message.textContent===t)message.textContent=""},900);
+}
+
+function reload(){
+  if(!running||player.reloading||player.ammo>=player.mag||player.reserve<=0)return;
+  player.reloading=true;
+  reloadTimer=0.9;
+}
+
+function shoot(){
+  if(!running||player.reloading||player.shootCooldown>0)return;
+  if(player.ammo<=0){say("RELOAD");return}
+  player.ammo--;
+  player.shootCooldown=0.18;
+  muzzle=0.08;
+  var speed=720;
+  bullets.push({x:player.x+Math.cos(player.angle)*24,y:player.y+Math.sin(player.angle)*24,
+                vx:Math.cos(player.angle)*speed,vy:Math.sin(player.angle)*speed,
+                life:0.8,damage:34+level*5});
+  updateHud();
+}
+
+function spawnZombie(){
+  var side=Math.floor(Math.random()*4),x,y;
+  if(side===0){x=-30;y=Math.random()*H}
+  else if(side===1){x=W+30;y=Math.random()*H}
+  else if(side===2){x=Math.random()*W;y=-30}
+  else{x=Math.random()*W;y=H+30}
+  var type=Math.random();
+  var z;
+  if(type<0.16) z={x:x,y:y,r:23,hp:170,max:170,speed:42,damage:20,kind:"BRUTE"};
+  else if(type<0.38) z={x:x,y:y,r:13,hp:55,max:55,speed:125,damage:10,kind:"RUNNER"};
+  else z={x:x,y:y,r:17,hp:80+wave*8,max:80+wave*8,speed:62+wave*2,damage:12,kind:"WALKER"};
+  zombies.push(z);
+}
+
+function hitZombie(z,dmg){
+  z.hp-=dmg;
+  for(var i=0;i<5;i++)particles.push({x:z.x,y:z.y,vx:(Math.random()-.5)*100,vy:(Math.random()-.5)*100,life:.25});
+  if(z.hp<=0){
+    score+=z.kind==="BRUTE"?50:10;
+    xp+=z.kind==="BRUTE"?35:10;
+    if(xp>=level*80){xp-=level*80;level++;player.maxHp+=10;player.hp=Math.min(player.maxHp,player.hp+25);say("LEVEL UP!")}
+    zombies.splice(zombies.indexOf(z),1);
+  }
+}
+
+function update(dt){
+  if(!running)return;
+
+  var dx=joyX,dy=joyY;
+  var len=Math.hypot(dx,dy);
+  if(len>1){dx/=len;dy/=len}
+  player.x+=dx*player.speed*dt;
+  player.y+=dy*player.speed*dt;
+  player.x=Math.max(20,Math.min(W-20,player.x));
+  player.y=Math.max(20,Math.min(H-20,player.y));
+
+  if(zombies.length===0&&spawnLeft===0){
+    spawnLeft=5+wave*3;
+    say("WAVE "+wave);
+  }
+  if(spawnLeft>0){
+    spawnTimer-=dt;
+    if(spawnTimer<=0){
+      spawnZombie();spawnLeft--;spawnTimer=Math.max(.15,.55-wave*.02);
+    }
+  }else if(zombies.length===0){
+    wave++;
+    spawnLeft=5+wave*3;
+  }
+
+  player.shootCooldown=Math.max(0,player.shootCooldown-dt);
+  muzzle=Math.max(0,muzzle-dt);
+  if(firing)shoot();
+
+  if(player.reloading){
+    reloadTimer-=dt;
+    if(reloadTimer<=0){
+      var need=player.mag-player.ammo;
+      var give=Math.min(need,player.reserve);
+      player.ammo+=give;player.reserve-=give;player.reloading=false;
+    }
+  }
+
+  if(zombies.length){
+    var nearest=zombies[0],best=Infinity;
+    zombies.forEach(function(z){
+      var d=Math.hypot(z.x-player.x,z.y-player.y);
+      if(d<best){best=d;nearest=z}
+    });
+    player.angle=Math.atan2(nearest.y-player.y,nearest.x-player.x);
+  }
+
+  bullets.forEach(function(b){b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt});
+  bullets=bullets.filter(function(b){return b.life>0&&b.x>-40&&b.x<W+40&&b.y>-40&&b.y<H+40});
+
+  for(var zi=zombies.length-1;zi>=0;zi--){
+    var z=zombies[zi],zx=player.x-z.x,zy=player.y-z.y,dist=Math.hypot(zx,zy);
+    if(dist>player.r+z.r+2){z.x+=zx/dist*z.speed*dt;z.y+=zy/dist*z.speed*dt}
+    else {player.hp-=z.damage*dt;if(player.hp<=0){updateHud();endGame();return}}
+  }
+
+  for(var bi=bullets.length-1;bi>=0;bi--){
+    var b=bullets[bi],hit=false;
+    for(var j=zombies.length-1;j>=0;j--){
+      var zz=zombies[j];
+      if(Math.hypot(b.x-zz.x,b.y-zz.y)<zz.r+5){
+        hitZombie(zz,b.damage);bullets.splice(bi,1);hit=true;break;
+      }
+    }
+  }
+
+  particles.forEach(function(p){p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt});
+  particles=particles.filter(function(p){return p.life>0});
+  updateHud();
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#11191a";ctx.fillRect(0,0,W,H);
+
+  // simple arena grid
+  ctx.strokeStyle="#ffffff08";ctx.lineWidth=1;
+  for(var x=0;x<W;x+=50){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}
+  for(var y=0;y<H;y+=50){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+
+  // zombies
+  zombies.forEach(function(z){
+    ctx.fillStyle=z.kind==="BRUTE"?"#65423b":z.kind==="RUNNER"?"#7d8f45":"#506b59";
+    ctx.beginPath();ctx.arc(z.x,z.y,z.r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#111";ctx.beginPath();ctx.arc(z.x-5,z.y-3,3,0,Math.PI*2);ctx.arc(z.x+5,z.y-3,3,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#e44";ctx.fillRect(z.x-z.r,z.y-z.r-7,z.r*2*(Math.max(0,z.hp)/z.max),3);
+  });
+
+  // bullets
+  ctx.fillStyle="#fff";
+  bullets.forEach(function(b){ctx.beginPath();ctx.arc(b.x,b.y,4,0,Math.PI*2);ctx.fill()});
+
+  // player
+  ctx.save();ctx.translate(player.x,player.y);ctx.rotate(player.angle);
+  ctx.fillStyle="#d8dee0";ctx.fillRect(0,-5,29,10);
+  ctx.fillStyle="#e9edf0";ctx.beginPath();ctx.arc(0,0,18,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#202729";ctx.beginPath();ctx.arc(0,0,8,0,Math.PI*2);ctx.fill();
+  if(muzzle>0){ctx.fillStyle="#ffd36b";ctx.beginPath();ctx.arc(34,0,10,0,Math.PI*2);ctx.fill()}
+  ctx.restore();
+
+  // health bar
+  ctx.fillStyle="#0008";ctx.fillRect(player.x-30,player.y+25,60,5);
+  ctx.fillStyle="#fff";ctx.fillRect(player.x-30,player.y+25,60*Math.max(0,player.hp/player.maxHp),5);
+
+  particles.forEach(function(p){ctx.fillStyle="#fff8";ctx.fillRect(p.x,p.y,3,3)});
+}
+
+function loop(t){
+  var dt=Math.min(.033,(t-last)/1000||0);
+  last=t;update(dt);draw();
+  if(running)raf=requestAnimationFrame(loop);
+}
+
+function pointerPos(e){
+  var r=stick.getBoundingClientRect();
+  var x=e.clientX-r.left-r.width/2,y=e.clientY-r.top-r.height/2;
+  var max=48,d=Math.hypot(x,y);
+  if(d>max){x=x/d*max;y=y/d*max}
+  joyX=x/max;joyY=y/max;
+  knob.style.transform="translate("+x+"px,"+y+"px)";
+}
+function stopJoy(){joyX=0;joyY=0;knob.style.transform="translate(0,0)"}
+
+stick.addEventListener("pointerdown",function(e){stick.setPointerCapture(e.pointerId);pointerPos(e)});
+stick.addEventListener("pointermove",function(e){if(e.buttons)pointerPos(e)});
+stick.addEventListener("pointerup",stopJoy);
+stick.addEventListener("pointercancel",stopJoy);
+
+fire.addEventListener("pointerdown",function(e){e.preventDefault();firing=true;shoot()});
+fire.addEventListener("pointerup",function(){firing=false});
+fire.addEventListener("pointercancel",function(){firing=false});
+reloadButton.addEventListener("pointerdown",function(e){e.preventDefault();reload()});
+
+start.addEventListener("click",startGame);
+start.addEventListener("touchend",function(e){e.preventDefault();startGame()});
+restart.addEventListener("click",startGame);
+restart.addEventListener("touchend",function(e){e.preventDefault();startGame()});
+
+reset();
+draw();
+})();
+</script>
+</body>
+</html>
