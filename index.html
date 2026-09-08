@@ -65,7 +65,7 @@ function resize(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight
 addEventListener('resize',resize);resize();
 
 const $=id=>document.getElementById(id);
-const level=$('level'), wave=$('wave'), hp=$('hp'), xpb=$('xpb'), cash=$('cash'), ammo=$('ammo'), reserve=$('reserve'), message=$('message'), buy=$('buy'), start=$('start'), startBtn=$('startBtn'), gameover=$('gameover'), final=$('final'), score=$('score'), restart=$('restart'), stick=$('stick'), knob=$('knob'), reload=$('reload'), shoot=$('shoot');
+const level=$('level'), wave=$('wave'), hp=$('hp'), xpb=$('xpb'), cash=$('cash'), ammo=$('ammo'), reserve=$('reserve'), message=$('message'), buy=$('buy'), start=$('start'), startBtn=$('startBtn'), gameover=$('gameover'), final=$('final'), score=$('score'), restart=$('restart'), stick=$('stick'), knob=$('knob'), reloadBtn=$('reload'), shootBtn=$('shoot');
 const ui={level,wave,hp,xp:xpb,cash,ammo,reserve,msg:message,buy};
 let running=false,last=0,keys={},joystick={x:0,y:0,active:false},shooting=false;
 let player,bullets=[],enemies=[],particles=[],walls=[],drops=[],waveNo=1,kills=0,spawnLeft=0,spawnTimer=0,waveTimer=0,between=false;
@@ -173,9 +173,9 @@ function loop(t){let dt=Math.min(.033,(t-last)/1000||0);last=t;update(dt);draw()
 
 function aimFromPoint(x,y){player.angle=Math.atan2(y-player.y,x-player.x)}
 function bindHold(el,down,up){el.addEventListener('pointerdown',e=>{e.preventDefault();down(e)});['pointerup','pointercancel','pointerleave'].forEach(k=>el.addEventListener(k,e=>{e.preventDefault();up(e)}))}
-bindHold(shoot,()=>{shooting=true;shoot()},()=>shooting=false);
+bindHold(shootBtn,()=>{shooting=true;shoot()},()=>shooting=false);
 setInterval(()=>{if(shooting)shoot()},60);
-reload.addEventListener('pointerdown',e=>{e.preventDefault();reload()});
+reloadBtn.addEventListener('pointerdown',e=>{e.preventDefault();reload()});
 buy.addEventListener('pointerdown',e=>{e.preventDefault();buyWall()});
 
 let stickId=null;
